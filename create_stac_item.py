@@ -3,6 +3,9 @@ from concurrent.futures import ThreadPoolExecutor
 from json import dumps
 import logging
 
+from tqdm import tqdm
+from tqdm.contrib.concurrent import thread_map
+
 import pandas as pd
 import typer
 from obstore.fsspec import FsspecStore
@@ -43,10 +46,18 @@ def stac_create_cli(
         default="file",
         help="The path to write the STAC items to. Should be either file or pawsey.",
     ),
+    destination_prefix: str | None = typer.Option(
+        default=None,
+        help="The prefix to use for the destination path",
+    ),
     parquet_path: str = typer.Option(
         PARQUET_PATH,
         help="The path to the parquet file containing the dataset metadata",
     ),
+    n_threads: int = typer.Option(
+        N_THREADS,
+        help="The number of threads to use for processing",
+    )
 ):
     """
     Create STAC items for a given dataset.
@@ -75,7 +86,6 @@ def stac_create_cli(
         df = df.iloc[:limit]
 
     def process_row(row):
-        log.info(f"Processing row: {row.Key}")
         item = create_stac_item(
             f"{row.Host}/{row.Bucket}/{row.Key}",
             row.date,
@@ -95,13 +105,17 @@ def stac_create_cli(
             store.write_text(out_path, dumps(item_dict, indent=2))
         else:
             # Write to an object store
+            if destination_prefix is not None:
+                out_path = destination_prefix + "/" + out_path
+            else:
+                out_path = os.path.join("stac", out_path)
             store.put(out_path, dumps(item_dict, indent=2).encode("utf-8"))
 
     # Use ThreadPoolExecutor to parallelize the processing of rows
-    log.info(f"Processing {len(df)} rows in parallel with {N_THREADS} threads.")
-    with ThreadPoolExecutor(max_workers=N_THREADS) as executor:
-        executor.map(process_row, [row for _, row in df.iterrows()])
-    log.info("Finished processing rows.")
+    log.info(f"Processing {len(df)} tifs in parallel with {n_threads} threads.")
+    with ThreadPoolExecutor(max_workers=n_threads) as executor:
+        thread_map(tqdm(executor.map(process_row, [row for _, row in df.iterrows()]), total=len(df), desc="Processing tifs"))
+    log.info("Finished processing tifs.")
 
 
 if __name__ == "__main__":
