@@ -1,0 +1,90 @@
+import os
+from concurrent.futures import ThreadPoolExecutor
+from json import dumps
+
+import pandas as pd
+import typer
+from obstore.fsspec import FsspecStore
+from obstore.store import S3Store
+from rio_stac import create_stac_item
+
+PARQUET_PATH = os.getenv(
+    "PARQUET",
+    "https://projects.pawsey.org.au/idea-objects/idea-curated-objects.parquet",
+)
+BUCKET = os.getenv("BUCKET", "ideatest")
+N_THREADS = int(os.getenv("SLURM_JOB_CPUS_PER_NODE", "16"))
+
+# Typer app
+app = typer.Typer()
+
+
+@app.command()
+def stac_create_cli(
+    dataset: str = typer.Argument(
+        ..., help="The name of the dataset to create STAC items for"
+    ),
+    limit: int | None = typer.Option(
+        default=None, help="The number of items to stop after"
+    ),
+    destination: str = typer.Option(
+        default="file",
+        help="The path to write the STAC items to. Should be either file or pawsey.",
+    ),
+    parquet_path: str = typer.Option(
+        PARQUET_PATH,
+        help="The path to the parquet file containing the dataset metadata",
+    ),
+):
+    """
+    Create STAC items for a given dataset.
+    """
+    # Configure out destination
+    if destination == "file":
+        store = FsspecStore(destination, mkdir=True)
+    elif destination == "pawsey":
+        store = S3Store(BUCKET)
+    else:
+        raise ValueError("Destination must be either 'file' or 'pawsey'.")
+
+    # Read the parquet file
+    fs = FsspecStore("https")
+    with fs.open(parquet_path) as f:
+        df = pd.read_parquet(f)
+
+    # Filter the dataframe for the given dataset
+    df = df[df.Dataset == dataset]
+
+    # Limit the number of items
+    if limit is not None:
+        df = df.iloc[:limit]
+
+    def process_row(row):
+        item = create_stac_item(
+            f"{row.Host}/{row.Bucket}/{row.Key}",
+            row.date,
+            collection=dataset,
+            asset_name="data",
+            with_eo=True,
+            with_proj=True,
+            with_raster=True,
+        )
+
+        item_dict = item.to_dict()
+        out_path = row.Key.replace(".tif", ".json")
+
+        if destination == "file":
+            # Local file system for testing
+            out_path = os.path.join(os.getcwd(), "stac", out_path)
+            store.write_text(out_path, dumps(item_dict, indent=2))
+        else:
+            # Write to an object store
+            store.put(out_path, dumps(item_dict, indent=2).encode("utf-8"))
+
+    # Use ThreadPoolExecutor to parallelize the processing of rows
+    with ThreadPoolExecutor(max_workers=N_THREADS) as executor:
+        executor.map(process_row, [row for _, row in df.iterrows()])
+
+
+if __name__ == "__main__":
+    app()
