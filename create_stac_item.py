@@ -24,9 +24,7 @@ log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 ch = logging.StreamHandler()
 ch.setLevel(logging.INFO)
-formatter = logging.Formatter(
-    "%(asctime)s - %(levelname)s - %(message)s"
-)
+formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 ch.setFormatter(formatter)
 log.addHandler(ch)
 
@@ -54,7 +52,7 @@ def stac_create_cli(
     n_threads: int = typer.Option(
         N_THREADS,
         help="The number of threads to use for processing",
-    )
+    ),
 ):
     """
     Create STAC items for a given dataset.
@@ -96,9 +94,12 @@ def stac_create_cli(
         item_dict = item.to_dict()
         out_path = row.Key.replace(".tif", ".json")
 
+        log.info(f"Processing {out_path}")
+
         if destination == "file":
             # Local file system for testing
-            out_path = os.path.join(os.getcwd(), "stac", out_path)
+            destination_prefix = "stac"
+            out_path = os.path.join(os.getcwd(), destination_prefix, out_path)
             store.write_text(out_path, dumps(item_dict, indent=2))
         else:
             # Write to an object store
