@@ -3,9 +3,6 @@ from concurrent.futures import ThreadPoolExecutor
 from json import dumps
 import logging
 
-from tqdm import tqdm
-from tqdm.contrib.concurrent import thread_map
-
 import pandas as pd
 import typer
 from obstore.fsspec import FsspecStore
@@ -114,7 +111,7 @@ def stac_create_cli(
     # Use ThreadPoolExecutor to parallelize the processing of rows
     log.info(f"Processing {len(df)} tifs in parallel with {n_threads} threads.")
     with ThreadPoolExecutor(max_workers=n_threads) as executor:
-        thread_map(tqdm(executor.map(process_row, [row for _, row in df.iterrows()]), total=len(df), desc="Processing tifs"))
+        executor.map(process_row, [row for _, row in df.iterrows()])
     log.info("Finished processing tifs.")
 
 
