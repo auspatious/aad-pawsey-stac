@@ -1,6 +1,7 @@
 import os
 from concurrent.futures import ThreadPoolExecutor
 from json import dumps
+import logging
 
 import pandas as pd
 import typer
@@ -17,6 +18,17 @@ N_THREADS = int(os.getenv("SLURM_JOB_CPUS_PER_NODE", "16"))
 
 # Typer app
 app = typer.Typer()
+
+# Get a logger
+log = logging.getLogger(__name__)
+log.setLevel(logging.INFO)
+ch = logging.StreamHandler()
+ch.setLevel(logging.INFO)
+formatter = logging.Formatter(
+    "%(asctime)s - %(levelname)s - %(message)s"
+)
+ch.setFormatter(formatter)
+log.addHandler(ch)
 
 
 @app.command()
@@ -40,9 +52,11 @@ def stac_create_cli(
     Create STAC items for a given dataset.
     """
     # Configure out destination
+    log.info(f"Using destination: {destination}")
     if destination == "file":
         store = FsspecStore(destination, mkdir=True)
     elif destination == "pawsey":
+        log.info(f"Using bucket: {BUCKET}")
         store = S3Store(BUCKET)
     else:
         raise ValueError("Destination must be either 'file' or 'pawsey'.")
@@ -57,9 +71,11 @@ def stac_create_cli(
 
     # Limit the number of items
     if limit is not None:
+        log.info(f"Limiting to {limit} items.")
         df = df.iloc[:limit]
 
     def process_row(row):
+        log.info(f"Processing row: {row.Key}")
         item = create_stac_item(
             f"{row.Host}/{row.Bucket}/{row.Key}",
             row.date,
@@ -82,8 +98,10 @@ def stac_create_cli(
             store.put(out_path, dumps(item_dict, indent=2).encode("utf-8"))
 
     # Use ThreadPoolExecutor to parallelize the processing of rows
+    log.info(f"Processing {len(df)} rows in parallel with {N_THREADS} threads.")
     with ThreadPoolExecutor(max_workers=N_THREADS) as executor:
         executor.map(process_row, [row for _, row in df.iterrows()])
+    log.info("Finished processing rows.")
 
 
 if __name__ == "__main__":
